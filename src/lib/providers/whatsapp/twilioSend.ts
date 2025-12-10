@@ -25,7 +25,7 @@ type TwilioResponse = {
 export async function sendWhatsAppMessage(
   to: string,
   contentSid: string
-): Promise<void> {
+): Promise<{ ok: boolean; error?: string }> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID!;
   const authToken = process.env.TWILIO_AUTH_TOKEN!;
   const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID!;
@@ -51,7 +51,8 @@ export async function sendWhatsAppMessage(
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Twilio API call failed: ${response.status} - ${errText}`);
+    console.log(`Twilio API call failed: ${response.status} - ${errText}`);
+    return { ok: false, error: errText };
   }
 
   const data = (await response.json()) as TwilioResponse;
@@ -69,15 +70,11 @@ export async function sendWhatsAppMessage(
           `Twilio returned error ${data.error_code}: ${data.error_message}`
         );
     }
+    return { ok: false, error: data.error_code.toString() };
   } else {
     console.log(
       `Message queued successfully (SID: ${data.sid}, Status: ${data.status})`
     );
+    return { ok: true };
   }
 }
-
-export default {
-  async send(to: string, content_sid: string) {
-    return await sendWhatsAppMessage(to, content_sid);
-  },
-};

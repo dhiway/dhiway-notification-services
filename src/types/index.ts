@@ -1,8 +1,8 @@
 export interface NotifyRequest {
-  channel: string; // sms.twilio, email.aws
-  priority?: 'realtime' | 'other';
+  channel: string;
   to: string;
   template_id: string;
+  priority?: 'realtime' | 'other';
   variables: any;
   dedupe_id?: string;
 }

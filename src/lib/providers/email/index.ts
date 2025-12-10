@@ -1,0 +1,1 @@
+export { emailProvider } from './mailer';

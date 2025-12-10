@@ -1,16 +1,17 @@
-import z from 'zod';
-import mailer from './email/mailer';
-import msg91 from './sms/msg91';
-import twillio from './whatsapp/twillio';
+import fs from 'fs';
+import path from 'path';
+import { ProviderDefinition } from '../../types/provider';
 
-export const providers_schema = z.object({
-  sms: z.any(),
-  email: z.any(),
-  whatsapp: z.any(),
-});
+const providersDir = path.join(__dirname);
 
-export const providers: z.infer<typeof providers_schema> = {
-  sms: msg91,
-  email: mailer,
-  whatsapp: twillio,
-};
+export const providers: Record<string, ProviderDefinition> = {};
+
+for (const dir of fs.readdirSync(providersDir)) {
+  const full = path.join(providersDir, dir);
+  if (fs.statSync(full).isDirectory()) {
+    const providerModule = require(path.join(full, 'index.js'));
+    const provider = providerModule[Object.keys(providerModule)[0]];
+
+    providers[provider.name] = provider;
+  }
+}
