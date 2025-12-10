@@ -1,0 +1,61 @@
+services:
+  notification-service:
+    build: .
+    container_name: notification-service
+    image: notification-service:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: $SERVER_PORT
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: $REDIS_PASSWORD
+      #Providers
+      SMTP_AWS_SES: ${SMTP_AWS_SES}
+      AWS_REGION: ${AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      SMTP_GMAIL: ${SMTP_GMAIL}
+      GMAIL_USER: ${GMAIL_USER}
+      GMAIL_PASS: ${GMAIL_PASS}
+      NODE_ENV: ${NODE_ENV}
+      MSG91_AUTH_KEY: ${MSG91_AUTH_KEY}
+      MSG91_TEMPLATE_ID: ${MSG91_TEMPLATE_ID}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_WHATSAPP_NUMBER: ${TWILIO_WHATSAPP_NUMBER}
+      #FEATURE_FLAGS
+      MAIL_LOG: ${MAIL_LOG}
+      LOG_ACTIVITY: ${LOG_ACTIVITY}
+      SEND_WHATSAPP_NOTIFICATION: ${SEND_WHATSAPP_NOTIFICATION}
+    ports:
+      - '$SERVER_PORT:$SERVER_PORT'
+    networks:
+      - notification-service-net
+  redis:
+    container_name: notification-service-redis
+    image: redis:7
+    restart: always
+    command:
+      - sh
+      - -c
+      - >
+        exec redis-server --appendonly yes --appendfsync everysec --save "" --maxmemory ${REDIS_MAXMEMORY:-256mb} --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-allkeys-lru} ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli ${REDIS_PASSWORD:+-a ${REDIS_PASSWORD}} ping | grep PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - notification-service-redis:/data
+    networks:
+      - notification-service-net
+networks:
+  notification-service-net:
+    name: notification-service-net
+    internal: false
+volumes:
+  notification-service-redis:
+    name: notification-service-redis

@@ -1,0 +1,4 @@
+v10
+node_modules
+dist
+.env
