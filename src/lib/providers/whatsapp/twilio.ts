@@ -6,7 +6,6 @@ export const whatsappProvider: ProviderDefinition = {
   name: 'whatsapp',
 
   templates: {
-    account: 'AC7d9a586f04da5da7f46a23c7fd936188',
     dialflow: 'HXa9cc9766cfdd966ae28b7ebc4ca0d09e',
   },
 
@@ -16,6 +15,7 @@ export const whatsappProvider: ProviderDefinition = {
 
   async send({ to, template_id, variables }) {
     const contentSid = variables.contentSid ?? template_id;
+    console.log('content_sid: ', contentSid);
     const ok = await sendWhatsAppMessage(to, contentSid);
     return ok;
   },

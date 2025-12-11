@@ -37,7 +37,7 @@ app.post('/notify', async (req, reply) => {
 
   const dedupeKey =
     body.dedupe_id ?? `${body.channel}:${body.to}:${body.template_id}`;
-  const isNew = await dedupe(dedupeKey);
+  const isNew = await dedupe(dedupeKey, 5);
   if (!isNew) return reply.send({ job_id, enqueued: false });
 
   const job = { job_id, ...body, priority };

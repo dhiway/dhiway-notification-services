@@ -14,4 +14,6 @@ export interface Job {
   to: string;
   template_id: string;
   variables: any;
+  attempt?: number; // number of tries so far
+  next_attempt_at?: number; // timestamp of when to retry
 }

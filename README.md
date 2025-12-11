@@ -257,7 +257,7 @@ Workers listen on:
 
 - `queue:realtime`
 - `queue:other`
-
+- `queue:dead`
 Each job is executed with:
 
 ```ts
