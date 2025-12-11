@@ -1,9 +1,9 @@
 import {
   popRealtime,
   popOther,
+  popScheduledRetries,
   pushDLQ,
   scheduleRetry,
-  popScheduledRetries,
 } from './queue';
 import { providers } from './providers';
 import { Job } from 'src/types';
@@ -12,7 +12,6 @@ const MAX_RETRIES = 5;
 
 async function processJob(job: Job) {
   const provider = providers[job.channel];
-
   job.attempt = (job.attempt ?? 0) + 1;
 
   const templateId = provider.templates[job.template_id];
@@ -27,67 +26,57 @@ async function processJob(job: Job) {
 
   if (!res.ok) {
     if (job.attempt >= MAX_RETRIES) {
-      console.log('Max retries reached → moving to DLQ:', job.job_id);
-      return await pushDLQ(job);
+      console.log('Max retries reached → DLQ:', job.job_id);
+      return pushDLQ(job);
     }
 
-    const delay = 5 * Math.pow(2, job.attempt - 1); // exponential backoff
+    const delay = 5 * Math.pow(2, job.attempt - 1);
     console.log(`Retry scheduled in ${delay}s:`, job.job_id);
 
-    await scheduleRetry(job, delay);
-    return;
+    return scheduleRetry(job, delay);
   }
 
   console.log('Delivered:', job.job_id);
 }
 
-export function spawnWorker() {
-  const { fork } = require('child_process');
-  fork(__filename, ['worker'], {
-    env: { ...process.env, WORKER: 'true' },
-  });
-}
-
-async function workerLoop(popFn: any) {
-  async function loop() {
-    const res = await popFn();
-    if (res) {
-      const job = JSON.parse(res[1]);
+async function mainLoop() {
+  while (true) {
+    // 1) Try realtime queue (priority)
+    const realtime = await popRealtime();
+    if (realtime) {
+      const job = JSON.parse(realtime[1]);
       await processJob(job);
+      continue;
     }
-    setImmediate(loop);
-  }
-  loop();
-}
 
-async function retryLoop() {
-  async function loop() {
-    try {
-      const jobs = await popScheduledRetries();
-      if (jobs.length) {
-        console.log('Retry loop found jobs:', jobs.length);
-        for (const j of jobs) {
-          try {
-            console.log('Retrying scheduled job:', j.job_id);
-            await processJob(j);
-          } catch (err) {
-            console.error('Error processing scheduled job:', j.job_id, err);
-            // if processJob re-schedules it again, that's fine
-          }
-        }
+    // 2) Try retry queue
+    const retries = await popScheduledRetries();
+    if (retries.length > 0) {
+      for (const job of retries) {
+        await processJob(job);
       }
-    } catch (err) {
-      console.error('Retry loop error:', err);
-    } finally {
-      // check again after 1s
-      setTimeout(loop, 1000);
+      continue;
     }
+
+    // 3) Try other queue (low priority)
+    const other = await popOther();
+    if (other) {
+      const job = JSON.parse(other[1]);
+      await processJob(job);
+      continue;
+    }
+
+    // 4) idle for 200ms
+    await new Promise((r) => setTimeout(r, 200));
   }
-  loop();
 }
 
 if (process.argv.includes('worker')) {
-  workerLoop(popRealtime);
-  workerLoop(popOther);
-  retryLoop();
+  console.log('Worker started:', process.pid);
+  mainLoop();
+}
+
+export function spawnWorker() {
+  const { fork } = require('child_process');
+  fork(__filename, ['worker']);
 }
