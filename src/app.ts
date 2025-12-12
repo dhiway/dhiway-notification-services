@@ -56,4 +56,19 @@ app.get('/providers', async () => {
   }));
 });
 
+app.get('/metrics/queue', async (req, reply) => {
+  try {
+    const metrics = await queue.getQueueMetrics();
+
+    return reply.send({
+      status: 'ok',
+      timestamp: Date.now(),
+      queues: metrics,
+    });
+  } catch (err: any) {
+    req.log.error('Failed to fetch queue metrics:', err?.message || 'Unknown');
+    return reply.code(500).send({ error: 'Failed to fetch metrics' });
+  }
+});
+
 export default app;
