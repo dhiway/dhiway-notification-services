@@ -257,8 +257,7 @@ Workers listen on:
 
 - `queue:realtime`
 - `queue:other`
-- `queue:dead`
-Each job is executed with:
+- `queue:dead` Each job is executed with:
 
 ```ts
 provider.send({ to, template_id, variables });
@@ -282,14 +281,53 @@ export const providerConfig = {
 
 ---
 
+# API Secret Protection
+
+```json
+{
+  "jobstack": {
+    "secret": "ns_jobstack_secret-key"
+  }
+}
+```
+
 # Testing
 
-Example using cURL:
+Example using cURL (for linux):
 
 ```bash
-curl -X POST http://localhost:3000/notify \
+KEY_ID="jobstack"
+SECRET="ns_jobstack_secret-key"
+
+METHOD="POST"
+PATH="/notify"
+TIMESTAMP=$(date +%s)
+NONCE=$(openssl rand -hex 16)
+
+BASE_STRING="$METHOD
+$PATH
+$TIMESTAMP
+$NONCE"
+
+SIGNATURE="v1=$(printf "%s" "$BASE_STRING" | \
+  openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')"
+
+curl -X POST http://localhost:7654/notify \
   -H "Content-Type: application/json" \
-  -d '{"channel":"sms","template_id":"login_otp","to":"+918888888888","variables":{"message":"Hi"}}'
+  -H "X-NS-Key: $KEY_ID" \
+  -H "X-NS-Timestamp: $TIMESTAMP" \
+  -H "X-NS-Nonce: $NONCE" \
+  -H "X-NS-Signature: $SIGNATURE" \
+  -d '{
+    "channel": "email",
+    "to": "test@example.com",
+    "template_id": "basic_email",
+    "priority": "realtime",
+    "variables": {
+      "subject": "Hello",
+      "html": "<h1>Hello World</h1>"
+    }
+  }'
 ```
 
 ---
