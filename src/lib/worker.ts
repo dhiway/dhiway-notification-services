@@ -7,6 +7,7 @@ import {
 } from './queue';
 import { providers } from './providers';
 import { Job } from 'src/types';
+import { loadSecrets } from './auth/secrets';
 
 const MAX_RETRIES = 5;
 
@@ -72,6 +73,7 @@ async function mainLoop() {
 }
 
 if (process.argv.includes('worker')) {
+  loadSecrets();
   console.log('Worker started:', process.pid);
   mainLoop();
 }

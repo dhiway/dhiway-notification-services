@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { providers } from './lib/providers';
 import * as queue from './lib/queue';
 import { dedupe } from './lib/dedupe';
+import { requestAuth } from './plugins/request-auth';
 
 const app = Fastify({ logger: true });
 
@@ -16,36 +17,42 @@ const NotifySchema = z.object({
   dedupe_id: z.string().optional(),
 });
 
-app.post('/notify', async (req, reply) => {
-  const parsed = NotifySchema.safeParse(req.body);
-  if (!parsed.success) return reply.code(400).send(z.formatError(parsed.error));
+app.route({
+  url: '/notify',
+  method: 'POST',
+  preHandler: requestAuth,
+  handler: async (req, reply) => {
+    const parsed = NotifySchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.code(400).send(z.formatError(parsed.error));
 
-  const body = parsed.data;
-  const provider = providers[body.channel];
-  if (!provider)
-    return reply.code(400).send({ error: 'Unknown provider channel' });
+    const body = parsed.data;
+    const provider = providers[body.channel];
+    if (!provider)
+      return reply.code(400).send({ error: 'Unknown provider channel' });
 
-  if (!provider.templates[body.template_id])
-    return reply.code(400).send({ error: 'Unknown template for provider' });
+    if (!provider.templates[body.template_id])
+      return reply.code(400).send({ error: 'Unknown template for provider' });
 
-  const v = provider.schema.safeParse(body.variables);
-  if (!v.success)
-    return reply.code(400).send({ error: z.formatError(v.error) });
+    const v = provider.schema.safeParse(body.variables);
+    if (!v.success)
+      return reply.code(400).send({ error: z.formatError(v.error) });
 
-  const job_id = uuid();
-  const priority = body.priority ?? 'other';
+    const job_id = uuid();
+    const priority = body.priority ?? 'other';
 
-  const dedupeKey =
-    body.dedupe_id ?? `${body.channel}:${body.to}:${body.template_id}`;
-  const isNew = await dedupe(dedupeKey, 5);
-  if (!isNew) return reply.send({ job_id, enqueued: false });
+    const dedupeKey =
+      body.dedupe_id ?? `${body.channel}:${body.to}:${body.template_id}`;
+    const isNew = await dedupe(dedupeKey, 5);
+    if (!isNew) return reply.send({ job_id, enqueued: false });
 
-  const job = { job_id, ...body, priority };
+    const job = { job_id, ...body, priority };
 
-  if (priority === 'realtime') await queue.pushRealtime(job);
-  else await queue.pushOther(job);
+    if (priority === 'realtime') await queue.pushRealtime(job);
+    else await queue.pushOther(job);
 
-  reply.send({ job_id, enqueued: true });
+    reply.send({ job_id, enqueued: true });
+  },
 });
 
 app.get('/providers', async () => {

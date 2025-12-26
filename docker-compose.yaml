@@ -11,6 +11,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: $REDIS_PASSWORD
+      INTERNAL_SECRETS_JSON: $INTERNAL_SECRETS_JSON
       #Providers
       SMTP_AWS_SES: ${SMTP_AWS_SES}
       AWS_REGION: ${AWS_REGION}
@@ -33,6 +34,8 @@ services:
       - '$SERVER_PORT:$SERVER_PORT'
     networks:
       - notification-service-net
+    volumes:
+      - ./config/internal-secrets.json:/app/config/internal-secrets.json:ro
   redis:
     container_name: notification-service-redis
     image: redis:7
