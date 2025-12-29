@@ -24,7 +24,8 @@ type TwilioResponse = {
 
 export async function sendWhatsAppMessage(
   to: string,
-  contentSid: string
+  contentSid: string,
+  variables?: Record<string, any>
 ): Promise<{ ok: boolean; error?: string }> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID!;
   const authToken = process.env.TWILIO_AUTH_TOKEN!;
@@ -39,6 +40,9 @@ export async function sendWhatsAppMessage(
   params.append('ContentSid', contentSid);
   params.append('MessagingServiceSid', messagingServiceSid);
 
+  if (variables) {
+    params.append('ContentVariables', JSON.stringify(variables));
+  }
   const response = await fetch(url, {
     method: 'POST',
     headers: {

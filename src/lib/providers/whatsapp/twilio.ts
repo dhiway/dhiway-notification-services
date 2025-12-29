@@ -11,12 +11,13 @@ export const whatsappProvider: ProviderDefinition = {
 
   schema: z.object({
     contentSid: z.string().nullable(),
+    contentVariables: z.record(z.string(), z.any()).nullable(),
   }),
 
   async send({ to, template_id, variables }) {
     const contentSid = variables.contentSid ?? template_id;
-    console.log('content_sid: ', contentSid);
-    const ok = await sendWhatsAppMessage(to, contentSid);
+    const contentVariables = variables.contentVariables ?? null;
+    const ok = await sendWhatsAppMessage(to, contentSid, contentVariables);
     return ok;
   },
 };
