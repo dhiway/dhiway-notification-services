@@ -15,8 +15,9 @@ async function processJob(job: Job) {
   const provider = providers[job.channel];
   job.attempt = (job.attempt ?? 0) + 1;
 
-  const templateId = provider.templates[job.template_id];
-
+  // Fallback to the original template id when provider mapping is empty (e.g. "other" for custom ContentSid)
+  const templateId = provider.templates[job.template_id] || job.template_id;
+  console.log ('Using template ID:', templateId);
   console.log(`Processing ${job.job_id} (attempt ${job.attempt})`);
 
   const res = await provider.send({
