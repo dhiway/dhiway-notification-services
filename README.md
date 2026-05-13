@@ -1,166 +1,173 @@
 # Notification Service
 
-A scalable, provider-agnostic notification dispatch system supporting Email,
-SMS, and WhatsApp with:
+A Fastify notification service for queueing provider-agnostic email, SMS, and
+WhatsApp messages. Requests are validated up front, written to Redis, and then
+processed asynchronously by a worker.
 
-- Pluggable, auto-registered providers
-- Provider-specific templates
-- Zod-validated request schemas
-- Real-time and scheduled (other) queues
-- Redis-backed worker using BRPOP
-- Rate limiting, dedupe, retries
-- Simple extensibility: add a provider by adding a folder
+## What It Does
 
----
+- Accepts notifications through one `POST /notify` API.
+- Supports provider-specific templates and variable schemas.
+- Exposes provider metadata with complete request payload examples.
+- Uses Redis lists for realtime and lower-priority work.
+- Uses a Redis sorted set for delayed retries.
+- Deduplicates repeated requests for a short window.
+- Sends failed jobs to a dead-letter queue after retry exhaustion.
+- Serves Scalar API docs at `/`.
 
-## Architecture Overview
+## Project Layout
 
-```
+```text
 src/
-├─ app.ts                    # Fastify API
-├─ server.ts                 # API + Worker spawn
-├─ types/
-│  ├─ index.ts               # NotifyRequest, Job
-│  └─ provider.ts            # Provider interface specification
+├─ app.ts                    # Fastify app bootstrap and route registration
+├─ server.ts                 # API startup and worker spawn
+├─ routes/
+│  ├─ docs.ts                # Scalar docs and OpenAPI JSON
+│  ├─ metrics.ts             # Queue metrics route
+│  ├─ notify.ts              # Notification enqueue route
+│  ├─ providers.ts           # Provider discovery routes
+│  └─ retry.ts               # Manual failed-job retry route
 ├─ lib/
-│  ├─ queue.ts               # Redis queue push/pop
-│  ├─ rate_limit.ts          # Token bucket limiter
-│  ├─ dedupe.ts              # Redis dedupe TTL
-│  ├─ redis.ts               # Redis connection
-│  ├─ worker.ts              # Background worker
-│  └─ providers/
-│      ├─ email/
-│      │    ├─ index.ts
-│      │    └─ mailer.ts
-│      ├─ sms/
-│      │    ├─ index.ts
-│      │    └─ msg91.ts
-│      ├─ whatsapp/
-│      │    ├─ index.ts
-│      │    └─ twilio.ts
-│      └─ index.ts           # Auto-loads all providers
+│  ├─ queue.ts               # Redis queues, retries, DLQ helpers
+│  ├─ worker.ts              # Background job processor
+│  ├─ utils/
+│  │  ├─ openapi.ts          # OpenAPI document builder
+│  │  └─ provider-docs.ts    # Provider payload/schema serialization
+│  └─ providers/             # Provider implementations
+└─ plugins/
+   └─ request-auth.ts        # HMAC request signing guard
 ```
 
----
-
-## Features
-
-### Provider-agnostic API
-
-All notifications are sent through the same /notify endpoint.
-
-### Strong input validation
-
-Zod schemas per provider define required fields and variable structures.
-
-### Automatic provider registration
-
-Any folder inside `providers/` is automatically loaded without manual updates.
-
-### Queue-backed architecture
-
-Redis BRPOP ensures low CPU usage and efficient background workers.
-
-### Dedupe system
-
-Prevents sending the same notification repeatedly.
-
-### Rate limiting
-
-Per-provider token bucket limiting.
-
-### Retry handling
-
-Failed jobs are pushed into the "other" queue for retry.
-
----
-
-## Requirements
+## Local Requirements
 
 - Node.js 20+
+- pnpm
 - Redis 6+
-- Provider credentials (AWS SES / SMTP, MSG91, Twilio, etc.)
+- Provider credentials for the providers you enable
 
----
-
-## Installation
+## Setup
 
 ```bash
 pnpm install
-```
-
----
-
-## Running Locally
-
-### 1. Copy environment variables
-
-```bash
 cp example.env .env
 ```
 
-Fill in provider-specific credentials.
+Fill `.env` with the credentials required by the provider implementations.
 
-### 2. Start Redis
+Start Redis:
 
 ```bash
 docker compose up redis
 ```
 
-### 3. Start API + Worker
+Start the API and worker:
 
 ```bash
 pnpm dev
 ```
 
-The worker is automatically spawned by `server.ts`.
+The API listens on `SERVER_PORT` or `3000` by default. `src/server.ts` also
+spawns one background worker process.
 
----
+## API Docs
 
-# API Usage
+Open the Scalar reference:
 
-Endpoint:
-
+```text
+GET /
 ```
-POST /notify
+
+The OpenAPI document used by Scalar is available at:
+
+```text
+GET /openapi.json
 ```
 
-Body:
+## Endpoint Summary
+
+Every endpoint below requires signed auth headers.
+
+```text
+GET  /                    # Scalar API reference HTML
+GET  /openapi.json        # OpenAPI document
+POST /notify              # Enqueue a notification
+GET  /providers           # List providers and complete payload examples
+GET  /providers/:name     # Find one provider by name
+GET  /metrics/queue       # Queue depths and retry/DLQ metrics
+POST /failed/retry        # Requeue jobs from the DLQ
+```
+
+## Queue Model
+
+The service uses four Redis structures:
+
+```text
+queue:realtime  # high-priority jobs
+queue:other     # normal/lower-priority jobs
+queue:retry     # delayed retry sorted set
+queue:dlq       # dead-letter queue
+```
+
+Workers check `queue:realtime` first, but only block for a short window. That
+prevents `queue:other` and due retries from being starved when no realtime jobs
+are arriving.
+
+Processing order inside the worker loop:
+
+1. Try one realtime job.
+2. Process any due retry jobs.
+3. Try one normal `other` job.
+4. Sleep briefly when no work is available.
+
+Failed sends are retried with exponential backoff. After the maximum retry
+count, the job is written to `queue:dlq`.
+
+## Authentication
+
+All API routes are protected by request signing. The request must include:
+
+```text
+X-NS-Key
+X-NS-Timestamp
+X-NS-Nonce
+X-NS-Signature
+```
+
+The signature format is:
+
+```text
+v1=<hmac_sha256>
+```
+
+The signed base string is:
+
+```text
+METHOD
+PATH
+TIMESTAMP
+NONCE
+```
+
+`PATH` must match the request URL path exactly as sent to Fastify. Include the
+query string if the request has one.
+
+Example secret configuration:
 
 ```json
 {
-  "channel": "email | sms | whatsapp",
-  "template_id": "string",
-  "to": "recipient",
-  "priority": "realtime | other",
-  "variables": {},
-  "dedupe_id": "optional"
+  "jobstack": {
+    "secret": "ns_jobstack_secret-key"
+  }
 }
 ```
 
----
+## Queue A Notification
 
-# Provider Templates and Capabilities
-
-The service exposes:
-
-```
-GET /providers
+```text
+POST /notify
 ```
 
-This returns:
-
-- List of providers
-- Templates supported by each provider
-- Zod schema describing required variables
-
-Useful for frontend or client-side integrations.
-
----
-
-# Request Examples
-
-## Email Example
+Request body:
 
 ```json
 {
@@ -170,15 +177,130 @@ Useful for frontend or client-side integrations.
   "priority": "realtime",
   "variables": {
     "fromName": "Notification Service",
-    "fromEmail": "no-reply@yourapp.com",
+    "fromEmail": "no-reply@example.com",
     "subject": "Welcome",
     "html": "<h1>Hello</h1>",
-    "replyTo": "support@yourapp.com"
+    "replyTo": "support@example.com"
+  },
+  "dedupe_id": "optional-client-id"
+}
+```
+
+Fields:
+
+- `channel`: provider name, such as `email`, `sms`, or `whatsapp`.
+- `template_id`: public template key from the provider metadata.
+- `to`: recipient address or phone number.
+- `priority`: optional, either `realtime` or `other`; defaults to `other`.
+- `variables`: provider-specific variables validated by that provider schema.
+- `dedupe_id`: optional override for dedupe. Without it, the service dedupes by
+  `channel:to:template_id`.
+
+Response:
+
+```json
+{
+  "job_id": "uuid",
+  "enqueued": true
+}
+```
+
+If the request is a duplicate inside the dedupe window:
+
+```json
+{
+  "job_id": "uuid",
+  "enqueued": false
+}
+```
+
+## Provider Discovery
+
+List all providers:
+
+```text
+GET /providers
+```
+
+This route requires signed auth headers.
+
+Find one provider by name:
+
+```text
+GET /providers/email
+GET /providers/sms
+GET /providers/whatsapp
+```
+
+These routes require signed auth headers.
+
+Provider responses include:
+
+- `name`: provider channel name used in `/notify`.
+- `templates`: public template keys mapped to provider template identifiers.
+- `template_payloads`: complete `/notify` payload examples per template.
+- `variables_schema`: JSON Schema for the `variables` object.
+- `notify_payload`: generic complete `/notify` payload shape for the provider.
+
+Example shape:
+
+```json
+{
+  "name": "sms",
+  "templates": {
+    "login_otp": "6896c26d6eb66c66340e1242"
+  },
+  "template_payloads": [
+    {
+      "template_id": "login_otp",
+      "provider_template_id": "6896c26d6eb66c66340e1242",
+      "payload": {
+        "channel": "sms",
+        "template_id": "login_otp",
+        "to": "+918888888888",
+        "priority": "other",
+        "variables": {
+          "message": "string"
+        }
+      }
+    }
+  ],
+  "variables_schema": {
+    "type": "object"
+  },
+  "notify_payload": {
+    "channel": "sms",
+    "template_id": "<template_id>",
+    "to": "+918888888888",
+    "priority": "other",
+    "variables": {
+      "message": "string"
+    }
   }
 }
 ```
 
-## SMS Example (MSG91)
+## Request Examples
+
+Email:
+
+```json
+{
+  "channel": "email",
+  "template_id": "basic_email",
+  "to": "user@example.com",
+  "priority": "realtime",
+  "variables": {
+    "fromName": "Notification Service",
+    "fromEmail": "no-reply@example.com",
+    "subject": "Welcome",
+    "html": "<h1>Hello</h1>",
+    "replyTo": "support@example.com"
+  }
+}
+```
+
+SMS:
 
 ```json
 {
@@ -191,109 +313,100 @@ Useful for frontend or client-side integrations.
 }
 ```
 
-## WhatsApp Example (Twilio)
+WhatsApp:
 
 ```json
 {
   "channel": "whatsapp",
-  "template_id": "otp",
+  "template_id": "dialflow",
   "to": "+918888888888",
   "variables": {
-    "contentSid": "OTP_TEMPLATE_CONTENT_SID"
+    "contentSid": null,
+    "contentVariables": {}
   }
 }
 ```
 
----
+## Queue Metrics
 
-# Provider Development Guide
-
-To add a new provider:
-
-### 1. Create a folder:
-
-```
-src/lib/providers/push/
+```text
+GET /metrics/queue
 ```
 
-### 2. Add index.ts:
+This route requires signed auth headers.
 
-```ts
-export { pushProvider } from './push';
-```
-
-### 3. Implement the provider:
-
-```ts
-import { z } from 'zod';
-import { ProviderDefinition } from '../../../types/provider';
-
-export const pushProvider: ProviderDefinition = {
-  name: 'push',
-
-  templates: {
-    welcome: 'PUSH_TEMPLATE_1',
-  },
-
-  schema: z.object({
-    title: z.string(),
-    message: z.string(),
-  }),
-
-  async send({ to, template_id, variables }) {
-    // push notification logic
-    return { ok: true };
-  },
-};
-```
-
-The provider is now automatically registered. No additional changes needed.
-
----
-
-# Worker Description
-
-Workers listen on:
-
-- `queue:realtime`
-- `queue:other`
-- `queue:dead` Each job is executed with:
-
-```ts
-provider.send({ to, template_id, variables });
-```
-
-Retries are handled by requeueing into `queue:other`.
-
----
-
-# Configuration
-
-### providerConfig.ts
-
-```ts
-export const providerConfig = {
-  sms: { rate: 100, burst: 40 },
-  email: { rate: 100, burst: 50 },
-  whatsapp: { rate: 100, burst: 10 },
-};
-```
-
----
-
-# API Secret Protection
+Example response:
 
 ```json
 {
-  "jobstack": {
-    "secret": "ns_jobstack_secret-key"
+  "status": "ok",
+  "timestamp": 1765363200000,
+  "queues": {
+    "realtime": 0,
+    "other": 0,
+    "retry_count": 0,
+    "retry_oldest": null,
+    "retry_eta_seconds": null,
+    "dlq": 0
   }
 }
 ```
 
-# Testing
+## Manually Retry Failed Jobs
 
-Example using cURL (for linux):
+Failed jobs in `queue:dlq` can be requeued manually:
+
+```text
+POST /failed/retry
+```
+
+This route requires signed auth headers.
+
+Retry one failed job by `job_id`:
+
+```json
+{
+  "job_id": "uuid",
+  "priority": "other"
+}
+```
+
+Retry a batch of failed jobs:
+
+```json
+{
+  "limit": 10,
+  "priority": "realtime"
+}
+```
+
+Fields:
+
+- `job_id`: optional. When present, only that DLQ job is retried.
+- `limit`: optional batch size when `job_id` is omitted. Defaults to `1`, max
+  `100`.
+- `priority`: optional destination queue, either `realtime` or `other`. Defaults
+  to `other`.
+
+Manual retry resets the job attempt count to `0` and moves the job from
+`queue:dlq` back into the selected queue.
+
+When `job_id` is provided and the job is not present in `queue:dlq`, the API
+returns `404`. When retrying a batch, malformed DLQ entries are counted as
+`skipped`.
+
+Response:
+
+```json
+{
+  "retried": ["uuid"],
+  "retried_count": 1,
+  "skipped": 0,
+  "not_found": []
+}
+```
+
+## Signed cURL Example
 
 ```bash
 KEY_ID="jobstack"
@@ -312,7 +425,7 @@ $NONCE"
 SIGNATURE="v1=$(printf "%s" "$BASE_STRING" | \
   openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')"
 
-curl -X POST http://localhost:7654/notify \
+curl -X POST http://localhost:3000/notify \
   -H "Content-Type: application/json" \
   -H "X-NS-Key: $KEY_ID" \
   -H "X-NS-Timestamp: $TIMESTAMP" \
@@ -324,19 +437,76 @@ curl -X POST http://localhost:7654/notify \
     "template_id": "basic_email",
     "priority": "realtime",
     "variables": {
+      "fromName": "Notification Service",
+      "fromEmail": "no-reply@example.com",
       "subject": "Hello",
       "html": "<h1>Hello World</h1>"
     }
   }'
 ```
 
----
+For signed GET requests, use the same signing process with the target method and
+path. Example for provider discovery:
 
-# Design Goals
+```bash
+METHOD="GET"
+PATH="/providers"
+TIMESTAMP=$(date +%s)
+NONCE=$(openssl rand -hex 16)
 
-- Unified and clean API
-- Clear separation of providers
-- Strict runtime validation
-- Easy to extend
-- Resilient under load
-- Fully asynchronous delivery model
+BASE_STRING="$METHOD
+$PATH
+$TIMESTAMP
+$NONCE"
+
+SIGNATURE="v1=$(printf "%s" "$BASE_STRING" | \
+  openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')"
+
+curl http://localhost:3000/providers \
+  -H "X-NS-Key: $KEY_ID" \
+  -H "X-NS-Timestamp: $TIMESTAMP" \
+  -H "X-NS-Nonce: $NONCE" \
+  -H "X-NS-Signature: $SIGNATURE"
+```
+
+## Adding A Provider
+
+Create a provider folder:
+
+```text
+src/lib/providers/push/
+```
+
+Add an index file:
+
+```ts
+export { pushProvider } from './push';
+```
+
+Implement the provider:
+
+```ts
+import { z } from 'zod';
+import { ProviderDefinition } from '../../../types/provider';
+
+export const pushProvider: ProviderDefinition = {
+  name: 'push',
+
+  templates: {
+    welcome: 'PUSH_TEMPLATE_1',
+  },
+
+  schema: z.object({
+    title: z.string(),
+    message: z.string(),
+  }),
+
+  async send({ to, template_id, variables }) {
+    console.log(to, template_id, variables);
+    return { ok: true };
+  },
+};
+```
+
+Provider folders are auto-loaded by `src/lib/providers/index.ts`. The provider
+name becomes the `channel` value for `/notify`.

@@ -15,7 +15,17 @@ async function processJob(job: Job) {
   const provider = providers[job.channel];
   job.attempt = (job.attempt ?? 0) + 1;
 
+  if (!provider) {
+    console.log('Unknown provider, sending to DLQ:', job.job_id, job.channel);
+    return pushDLQ(job);
+  }
+
   const templateId = provider.templates[job.template_id];
+  if (!templateId) {
+    console.log('Unknown provider template, sending to DLQ:', job.job_id);
+    return pushDLQ(job);
+  }
+
   console.log(`Processing ${job.job_id} (attempt ${job.attempt})`);
 
   const res = await provider.send({
@@ -41,7 +51,7 @@ async function processJob(job: Job) {
 
 async function mainLoop() {
   while (true) {
-    // 1) Try realtime queue (priority)
+    // 1) Try realtime queue first, but do not block forever.
     const realtime = await popRealtime();
     if (realtime) {
       const job = JSON.parse(realtime[1]);
@@ -58,7 +68,7 @@ async function mainLoop() {
       continue;
     }
 
-    // 3) Try other queue (low priority)
+    // 3) Try other queue (low priority), also with a short timeout.
     const other = await popOther();
     if (other) {
       const job = JSON.parse(other[1]);

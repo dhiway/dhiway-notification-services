@@ -20,20 +20,87 @@ export async function pushOther(job: Job) {
   return redis.lpush(OTHER_QUEUE, JSON.stringify(job));
 }
 
-/** Pop from REALTIME queue (non-blocking). */
-export async function popRealtime() {
-  return redis.brpop(REALTIME_QUEUE, 0); // BLOCKS until an item arrives
+/** Pop from REALTIME queue. Timeout prevents starving lower-priority work. */
+export async function popRealtime(timeoutSeconds = 1) {
+  return redis.brpop(REALTIME_QUEUE, timeoutSeconds);
 }
 
-/** Pop from OTHER queue (non-blocking). */
-export async function popOther() {
-  return redis.brpop(OTHER_QUEUE, 0);
+/** Pop from OTHER queue. Timeout keeps retries from waiting behind idle pops. */
+export async function popOther(timeoutSeconds = 1) {
+  return redis.brpop(OTHER_QUEUE, timeoutSeconds);
 }
 
 // Dead Letter Queue
 export async function pushDLQ(job: Job) {
   console.log('DLQ →', job.job_id);
   return redis.lpush(DLQ_QUEUE, JSON.stringify(job));
+}
+
+type RetryFailedJobsOptions = {
+  jobId?: string;
+  limit?: number;
+  priority?: 'realtime' | 'other';
+};
+
+function parseJob(raw: string): Job | null {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function requeueFailedJob(raw: string, priority: 'realtime' | 'other') {
+  const job = parseJob(raw);
+  if (!job) return null;
+
+  const retryJob: Job = {
+    ...job,
+    priority,
+    attempt: 0,
+    next_attempt_at: undefined,
+  };
+
+  if (priority === 'realtime') await pushRealtime(retryJob);
+  else await pushOther(retryJob);
+
+  return retryJob;
+}
+
+export async function retryFailedJobs({
+  jobId,
+  limit = 1,
+  priority = 'other',
+}: RetryFailedJobsOptions = {}) {
+  const retried: string[] = [];
+  const skipped: string[] = [];
+
+  if (jobId) {
+    const failedJobs = await redis.lrange(DLQ_QUEUE, 0, -1);
+    const raw = failedJobs.find((item) => parseJob(item)?.job_id === jobId);
+
+    if (!raw) return { retried, skipped, not_found: [jobId] };
+
+    const removed = await redis.lrem(DLQ_QUEUE, 1, raw);
+    if (removed === 0) return { retried, skipped, not_found: [jobId] };
+
+    const job = await requeueFailedJob(raw, priority);
+    if (job) retried.push(job.job_id);
+    else skipped.push(raw);
+
+    return { retried, skipped, not_found: [] };
+  }
+
+  for (let i = 0; i < limit; i += 1) {
+    const raw = await redis.rpop(DLQ_QUEUE);
+    if (!raw) break;
+
+    const job = await requeueFailedJob(raw, priority);
+    if (job) retried.push(job.job_id);
+    else skipped.push(raw);
+  }
+
+  return { retried, skipped, not_found: [] };
 }
 
 // Retry Scheduling
@@ -103,7 +170,7 @@ export async function getQueueMetrics() {
     const score = Number(oldestRetryRaw[1]); // timestamp in seconds
     retry_oldest = score;
 
-    const now = Math.floor(Date.now() / 1000);
+    const now = Date.now();
     retry_eta_seconds = Math.max(0, score - now);
   }
 
