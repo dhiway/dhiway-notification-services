@@ -34,7 +34,7 @@ importers:
         specifier: ^8.0.5
         version: 8.0.5
       uuid:
-        specifier: '>=13.0.1'
+        specifier: ^14.0.0
         version: 14.0.0
       zod:
         specifier: ^4.1.13
