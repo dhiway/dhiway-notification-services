@@ -42,7 +42,7 @@ export const smsProvider: ProviderDefinition = {
       provider_template_id: process.env.MSG91_TEMPLATE_ID!,
       schema: z.object({
         otp: z.string(),
-        expiresIn: z.number(),
+        expiry: z.number(),
       }),
     },
   },

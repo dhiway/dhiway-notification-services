@@ -280,9 +280,9 @@ Example shape:
         "type": "object",
         "properties": {
           "otp": { "type": "string" },
-          "expiresIn": { "type": "number" }
+          "expiry": { "type": "number" }
         },
-        "required": ["otp", "expiresIn"],
+        "required": ["otp", "expiry"],
         "additionalProperties": false
       },
       "payload": {
@@ -292,7 +292,7 @@ Example shape:
         "priority": "other",
         "variables": {
           "otp": "string",
-          "expiresIn": 5
+          "expiry": 5
         }
       }
     }
@@ -344,7 +344,7 @@ SMS:
   "to": "+918888888888",
   "variables": {
     "otp": "987654",
-    "expiresIn": 5
+    "expiry": 5
   }
 }
 ```
