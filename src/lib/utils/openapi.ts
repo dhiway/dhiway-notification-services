@@ -64,10 +64,11 @@ export function openApiDocument() {
                   sms: {
                     value: {
                       channel: 'sms',
-                      template_id: 'login_otp',
+                      template_id: 'credential_wallet_login_otp',
                       to: '+918888888888',
                       variables: {
-                        message: 'Your OTP is 987654',
+                        otp: '987654',
+                        expiresIn: 5,
                       },
                     },
                   },

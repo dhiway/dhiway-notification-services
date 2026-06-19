@@ -29,10 +29,11 @@ export async function notifyRoutes(app: FastifyInstance) {
       const provider = providers[body.channel];
       if (!provider)
         return reply.code(400).send({ error: 'Unknown provider channel' });
-      if (typeof provider.templates[body.template_id] !== 'string')
+      const template = provider.templates[body.template_id];
+      if (!template)
         return reply.code(400).send({ error: 'Unknown template for provider' });
 
-      const v = provider.schema.safeParse(body.variables);
+      const v = template.schema.safeParse(body.variables);
       if (!v.success)
         return reply.code(400).send({ error: z.formatError(v.error) });
 
@@ -44,7 +45,7 @@ export async function notifyRoutes(app: FastifyInstance) {
       const isNew = await dedupe(dedupeKey, 5);
       if (!isNew) return reply.send({ job_id, enqueued: false });
 
-      const job = { job_id, ...body, priority };
+      const job = { job_id, ...body, variables: v.data, priority };
 
       if (priority === 'realtime') await queue.pushRealtime(job);
       else await queue.pushOther(job);

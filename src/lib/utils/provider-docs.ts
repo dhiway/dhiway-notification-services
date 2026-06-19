@@ -46,32 +46,46 @@ function sampleRecipient(providerName: string) {
 }
 
 export function serializeProvider(provider: ProviderDefinition) {
-  const variablesSchema = z.toJSONSchema(provider.schema);
   const templatePayloads = Object.entries(provider.templates).map(
-    ([template_id, provider_template_id]) => ({
-      template_id,
-      provider_template_id,
-      payload: {
-        channel: provider.name,
+    ([template_id, template]) => {
+      const variablesSchema = z.toJSONSchema(template.schema);
+
+      return {
         template_id,
-        to: sampleRecipient(provider.name),
-        priority: 'other',
-        variables: sampleVariablesFromSchema(variablesSchema),
-      },
-    })
+        provider_template_id: template.provider_template_id,
+        variables_schema: variablesSchema,
+        payload: {
+          channel: provider.name,
+          template_id,
+          to: sampleRecipient(provider.name),
+          priority: 'other',
+          variables: sampleVariablesFromSchema(variablesSchema),
+        },
+      };
+    }
   );
 
   return {
     name: provider.name,
-    templates: provider.templates,
+    templates: Object.fromEntries(
+      Object.entries(provider.templates).map(([template_id, template]) => [
+        template_id,
+        template.provider_template_id,
+      ])
+    ),
     template_payloads: templatePayloads,
-    variables_schema: variablesSchema,
+    variables_schema: Object.fromEntries(
+      Object.entries(provider.templates).map(([template_id, template]) => [
+        template_id,
+        z.toJSONSchema(template.schema),
+      ])
+    ),
     notify_payload: {
       channel: provider.name,
       template_id: '<template_id>',
       to: sampleRecipient(provider.name),
       priority: 'other',
-      variables: sampleVariablesFromSchema(variablesSchema),
+      variables: '<template variables>',
     },
   };
 }

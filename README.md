@@ -239,7 +239,7 @@ Provider responses include:
 - `name`: provider channel name used in `/notify`.
 - `templates`: public template keys mapped to provider template identifiers.
 - `template_payloads`: complete `/notify` payload examples per template.
-- `variables_schema`: JSON Schema for the `variables` object.
+- `variables_schema`: JSON Schemas keyed by public template ID.
 - `notify_payload`: generic complete `/notify` payload shape for the provider.
 
 Example shape:
@@ -248,12 +248,21 @@ Example shape:
 {
   "name": "sms",
   "templates": {
-    "login_otp": "6896c26d6eb66c66340e1242"
+    "login_otp": "6896c26d6eb66c66340e1242",
+    "credential_wallet_login_otp": "6896c26d6eb66c66340e1242"
   },
   "template_payloads": [
     {
       "template_id": "login_otp",
       "provider_template_id": "6896c26d6eb66c66340e1242",
+      "variables_schema": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" }
+        },
+        "required": ["message"],
+        "additionalProperties": false
+      },
       "payload": {
         "channel": "sms",
         "template_id": "login_otp",
@@ -263,19 +272,45 @@ Example shape:
           "message": "string"
         }
       }
+    },
+    {
+      "template_id": "credential_wallet_login_otp",
+      "provider_template_id": "6896c26d6eb66c66340e1242",
+      "variables_schema": {
+        "type": "object",
+        "properties": {
+          "otp": { "type": "string" },
+          "expiresIn": { "type": "number" }
+        },
+        "required": ["otp", "expiresIn"],
+        "additionalProperties": false
+      },
+      "payload": {
+        "channel": "sms",
+        "template_id": "credential_wallet_login_otp",
+        "to": "+918888888888",
+        "priority": "other",
+        "variables": {
+          "otp": "string",
+          "expiresIn": 5
+        }
+      }
     }
   ],
   "variables_schema": {
-    "type": "object"
+    "login_otp": {
+      "type": "object"
+    },
+    "credential_wallet_login_otp": {
+      "type": "object"
+    }
   },
   "notify_payload": {
     "channel": "sms",
     "template_id": "<template_id>",
     "to": "+918888888888",
     "priority": "other",
-    "variables": {
-      "message": "string"
-    }
+    "variables": "<template variables>"
   }
 }
 ```
@@ -305,10 +340,11 @@ SMS:
 ```json
 {
   "channel": "sms",
-  "template_id": "login_otp",
+  "template_id": "credential_wallet_login_otp",
   "to": "+918888888888",
   "variables": {
-    "message": "Your OTP is 987654"
+    "otp": "987654",
+    "expiresIn": 5
   }
 }
 ```
@@ -493,13 +529,14 @@ export const pushProvider: ProviderDefinition = {
   name: 'push',
 
   templates: {
-    welcome: 'PUSH_TEMPLATE_1',
+    welcome: {
+      provider_template_id: 'PUSH_TEMPLATE_1',
+      schema: z.object({
+        title: z.string(),
+        message: z.string(),
+      }),
+    },
   },
-
-  schema: z.object({
-    title: z.string(),
-    message: z.string(),
-  }),
 
   async send({ to, template_id, variables }) {
     console.log(to, template_id, variables);

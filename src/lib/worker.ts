@@ -20,8 +20,8 @@ async function processJob(job: Job) {
     return pushDLQ(job);
   }
 
-  const templateId = provider.templates[job.template_id];
-  if (!templateId) {
+  const template = provider.templates[job.template_id];
+  if (!template) {
     console.log('Unknown provider template, sending to DLQ:', job.job_id);
     return pushDLQ(job);
   }
@@ -30,8 +30,10 @@ async function processJob(job: Job) {
 
   const res = await provider.send({
     to: job.to,
-    template_id: templateId,
-    variables: job.variables,
+    template_id: template.provider_template_id,
+    variables: template.mapVariables
+      ? template.mapVariables(job.variables)
+      : job.variables,
   });
 
   if (!res.ok) {
