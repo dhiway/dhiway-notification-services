@@ -71,6 +71,18 @@ export function openApiDocument() {
                       },
                     },
                   },
+                  sms_otp: {
+                    summary: 'SMS OTP with typed variables',
+                    value: {
+                      channel: 'sms',
+                      template_id: 'credential_wallet_login_otp',
+                      to: '+918888888888',
+                      variables: {
+                        otp: '987654',
+                        expiry: 5,
+                      },
+                    },
+                  },
                   whatsapp: {
                     value: {
                       channel: 'whatsapp',

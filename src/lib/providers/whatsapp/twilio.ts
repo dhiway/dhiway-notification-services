@@ -6,14 +6,21 @@ export const whatsappProvider: ProviderDefinition = {
   name: 'whatsapp',
 
   templates: {
-    dialflow: 'HXa9cc9766cfdd966ae28b7ebc4ca0d09e',
-    other: 'other',
+    dialflow: {
+      provider_template_id: 'HXa9cc9766cfdd966ae28b7ebc4ca0d09e',
+      schema: z.object({
+        contentSid: z.string().nullable().describe('set template_id to other'),
+        contentVariables: z.record(z.string(), z.any()).nullable(),
+      }),
+    },
+    other: {
+      provider_template_id: 'other',
+      schema: z.object({
+        contentSid: z.string().describe('Twilio Content SID'),
+        contentVariables: z.record(z.string(), z.any()).nullable(),
+      }),
+    },
   },
-
-  schema: z.object({
-    contentSid: z.string().nullable().describe('set template_id to other'),
-    contentVariables: z.record(z.string(), z.any()).nullable(),
-  }),
 
   async send({ to, template_id, variables }) {
     const contentSid =

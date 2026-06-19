@@ -3,8 +3,8 @@ import { ProviderDefinition } from '../../../types/provider';
 
 export async function sendSmsWithMsg91(
   to: string,
-  message: string,
-  template_id: string
+  template_id: string,
+  variables: Record<string, string | number>
 ) {
   const phone = to.startsWith('+') ? to.slice(1) : to;
   const resp = await fetch('https://control.msg91.com/api/v5/flow', {
@@ -16,7 +16,7 @@ export async function sendSmsWithMsg91(
     body: JSON.stringify({
       template_id,
       short_url: 0,
-      recipients: [{ mobiles: phone, var: message }],
+      recipients: [{ mobiles: phone, ...variables }],
     }),
   });
 
@@ -31,14 +31,23 @@ export const smsProvider: ProviderDefinition = {
   name: 'sms',
 
   templates: {
-    login_otp: '6896c26d6eb66c66340e1242',
+    login_otp: {
+      provider_template_id: '6896c26d6eb66c66340e1242',
+      schema: z.object({
+        message: z.string(),
+      }),
+      mapVariables: (variables) => ({ var: variables.message }),
+    },
+    credential_wallet_login_otp: {
+      provider_template_id: process.env.MSG91_TEMPLATE_ID!,
+      schema: z.object({
+        otp: z.string(),
+        expiry: z.number(),
+      }),
+    },
   },
 
-  schema: z.object({
-    message: z.string(),
-  }),
-
   async send({ to, template_id, variables }) {
-    return await sendSmsWithMsg91(to, variables.message, template_id);
+    return await sendSmsWithMsg91(to, template_id, variables);
   },
 };
